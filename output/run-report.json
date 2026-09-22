@@ -1,0 +1,12 @@
+{
+  "catalogue_pages": 3,
+  "discovered_urls": 60,
+  "successful_records": 60,
+  "validation_errors": 0,
+  "failed_pages": [
+    {
+      "url": "https://books.toscrape.com/catalogue/this-page-does-not-exist/index.html",
+      "error": "Failed to fetch https://books.toscrape.com/catalogue/this-page-does-not-exist/index.html: status=404"
+    }
+  ]
+}

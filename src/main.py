@@ -38,20 +38,68 @@ def fetch_page(url, cache_file):
 
     print(f"status={response.status_code}")
 
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to fetch page: status={response.status_code}"
+    if response.status_code in (403, 404):
+        raise FetchError(
+            f"Failed to fetch {url}: status={response.status_code}"
+    )
+
+    if 500 <= response.status_code < 600:
+        print(f"RETRY {url}")
+
+    time.sleep(0.5)
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=10
+    )
+
+    print(f"retry_status={response.status_code}")
+
+    if 500 <= response.status_code < 600:
+        print(f"RETRY {url}")
+
+    time.sleep(0.5)
+
+    try:
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=10
         )
 
-    response.encoding = "utf-8"
+    except requests.Timeout:
+        print(f"RETRY {url}")
 
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(response.text, encoding="utf-8")
+        try:
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=10
+            )
+        except requests.Timeout:
+            raise FetchError(
+                f"Failed to fetch {url}: timeout after retry"
+            )
 
-    print(f"bytes={len(response.content)}")
+    print(f"retry_status={response.status_code}")
 
-    return response.text
+    if response.status_code != 200:
+        raise FetchError(
+            f"Failed to fetch {url}: status={response.status_code}"
+        )
 
+        response.encoding = "utf-8"
+
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(response.text, encoding="utf-8")
+
+        print(f"bytes={len(response.content)}")
+
+        return response.text
+
+class FetchError(Exception):
+    pass
 
 class Book(BaseModel):
     title: str
@@ -142,22 +190,36 @@ if __name__ == "__main__":
     print(f"discovered={len(all_book_urls)}")
     print(f"unique_urls={len(unique_book_urls)}")
 
-    books = []
+    test_urls = unique_book_urls + [
+    "https://books.toscrape.com/catalogue/this-page-does-not-exist/index.html"
+]
 
-    for index, book_url in enumerate(unique_book_urls, start=1):
+    books = []
+    failed_pages = []
+
+    for index, book_url in enumerate(test_urls, start=1):
         book_cache_file = Path(f"cache/books/book-{index}.html")
 
-        book_html = fetch_page(book_url, book_cache_file)
+        try:
+            book_html = fetch_page(book_url, book_cache_file)
 
-        book = parse_book_page(
-            book_html,
-            book_url,
-            URL
-        )
+            book = parse_book_page(
+                book_html,
+                book_url,
+                URL
+            )
 
-        books.append(book)
+            books.append(book)
 
-        print(f"parsed_book={index}/60")
+            print(f"parsed_book={len(books)}/60")
+
+        except FetchError as error:
+            failed_pages.append({
+                "url": book_url,
+                "error": str(error),
+            })
+
+            print(f"FAILED {book_url}: {error}")
 
     print(f"records={len(books)}")
     output_file = Path("output/raw-books.json")
@@ -195,3 +257,18 @@ with errors_output_file.open("w", encoding="utf-8") as f:
 
 print(f"saved={books_output_file}")
 print(f"saved={errors_output_file}")
+run_report = {
+    "catalogue_pages": catalogue_pages,
+    "discovered_urls": len(unique_book_urls),
+    "successful_records": len(valid_books),
+    "validation_errors": len(errors),
+    "failed_pages": failed_pages,
+}
+
+report_file = Path("output/run-report.json")
+
+with report_file.open("w", encoding="utf-8") as f:
+    json.dump(run_report, f, indent=2, ensure_ascii=False)
+
+print(f"failed_pages={len(failed_pages)}")
+print(f"saved={report_file}")
