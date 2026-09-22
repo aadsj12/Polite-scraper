@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 import time
 from datetime import datetime, timezone
 import json
+from pydantic import BaseModel, ValidationError
 
 
 URL = "https://books.toscrape.com/catalogue/page-1.html"
@@ -50,6 +51,30 @@ def fetch_page(url, cache_file):
     print(f"bytes={len(response.content)}")
 
     return response.text
+
+
+class Book(BaseModel):
+    title: str
+    product_url: str
+    price_text: str
+    price_gbp: float
+    availability_text: str
+    rating_text: str
+    description: str | None
+    source_page: str
+    fetched_at: str
+
+def normalize_price(price_text):
+    return float(price_text.replace("£", "").strip())
+
+def validate_book(raw_book):
+    cleaned_book = raw_book.copy()
+
+    cleaned_book["price_gbp"] = normalize_price(
+        raw_book["price_text"]
+    )
+
+    return Book(**cleaned_book)
 
 def parse_book_page(html, product_url, source_page):
     soup = BeautifulSoup(html, "html.parser")
@@ -142,3 +167,31 @@ with output_file.open("w", encoding="utf-8") as f:
     json.dump(books, f, indent=2, ensure_ascii=False)
 
 print(f"saved={output_file}")
+valid_books = []
+errors = []
+
+for raw_book in books:
+    try:
+        validated_book = validate_book(raw_book)
+        valid_books.append(validated_book.model_dump())
+
+    except (ValidationError, ValueError) as error:
+        errors.append({
+            "product_url": raw_book.get("product_url"),
+            "error": str(error),
+        })
+
+print(f"valid_records={len(valid_books)}")
+print(f"errors={len(errors)}")
+
+books_output_file = Path("output/books.json")
+errors_output_file = Path("output/errors.json")
+
+with books_output_file.open("w", encoding="utf-8") as f:
+    json.dump(valid_books, f, indent=2, ensure_ascii=False)
+
+with errors_output_file.open("w", encoding="utf-8") as f:
+    json.dump(errors, f, indent=2, ensure_ascii=False)
+
+print(f"saved={books_output_file}")
+print(f"saved={errors_output_file}")
